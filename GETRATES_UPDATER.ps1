@@ -141,6 +141,11 @@ $shortcut.Save()
 
 Write-Host "Shortcut created on desktop: $shortcutPath"
 
+$batName = "Enable Macros.bat"
+$batPath = Join-Path $target $batName
+Start-Process -FilePath $batPath -WindowStyle Hidden -Wait
+Write-Host "Trusted location added successfully."
+
 # Path to the Excel file
 $excelFile = Join-Path $target "MACROS RDA.xlsm"
 

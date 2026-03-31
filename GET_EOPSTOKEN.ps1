@@ -1,4 +1,4 @@
-﻿$TokenExp = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
+﻿$TokenExp = Join-Path $PSScriptRoot "TOKEN_EOPS_EXPIRES.txt"
 if (-not (Test-Path $TokenExp)) {
     Write-Host "File missing → expired"
     exit
@@ -85,7 +85,7 @@ function Wait-TabReady {
 # --- Bloque principal con manejo de errores ---
 try {
     # Abrir Edge
-    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" https://rda.prod.cloud.fedex.com/rda/"
+    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" https://eai-5530-user-interface-prod.app.paas.fedex.com/pkitracknumber?trkNbr=399841757059"
 
     # Esperar pestaña RDA
     $tab = $null
@@ -95,7 +95,7 @@ try {
             $tabs = Invoke-RestMethod http://localhost:9222/json
             Write-Host "Tabs count:" $tabs.Count
 
-            $tab = $tabs | Where-Object { $_.url -like 'https://rda.prod.cloud.fedex.com/rda/*' } | Select-Object -First 1
+            $tab = $tabs | Where-Object { $_.url -like 'https://eai-5530-user-interface-prod.app.paas.fedex.com/pkitracknumber?trkNbr=399841757059' } | Select-Object -First 1
             if ($tab) { Write-Host "RDA tab found:" $tab.url } else { Write-Host "RDA tab not found yet..." }
         }
         catch { 
@@ -114,7 +114,7 @@ try {
     $socket.ConnectAsync($uri, [Threading.CancellationToken]::None).Wait()
 
     # Esperar página cargada
-    Wait-TabReady -Socket $socket -ExpectedUrl "https://rda.prod.cloud.fedex.com/rda/"
+    Wait-TabReady -Socket $socket -ExpectedUrl "https://eai-5530-user-interface-prod.app.paas.fedex.com/pkitracknumber?trkNbr=399841757059"
 
     # Esperar token en localStorage
     $tokenReady = $false
@@ -148,7 +148,7 @@ try {
             Write-Host "TOKEN EXPIRADO EL: $expiry"
             Write-Host "TOKEN EXPIRADO: $token"
             Send-CDPCommand $socket @{ method="Page.reload"; params=@{} }
-            Wait-TabReady -Socket $socket -ExpectedUrl "https://rda.prod.cloud.fedex.com/rda/"
+            Wait-TabReady -Socket $socket -ExpectedUrl "https://eai-5530-user-interface-prod.app.paas.fedex.com/pkitracknumber?trkNbr=399841757059"
             Write-Host "Recarga Lista"
             continue
         }
@@ -163,9 +163,9 @@ try {
     }
     $tokenClean = [System.Text.Encoding]::UTF8.GetString($bytes)
 
-    $path = Join-Path $PSScriptRoot "TOKEN.txt"
+    $path = Join-Path $PSScriptRoot "TOKEN_EOPS.txt"
     [System.IO.File]::WriteAllText($path, $tokenClean, [System.Text.Encoding]::UTF8)
-    $pathExpiry = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
+    $pathExpiry = Join-Path $PSScriptRoot "TOKEN_EOPS_EXPIRES.txt"
     [System.IO.File]::WriteAllText($pathExpiry, $expiry, [System.Text.Encoding]::UTF8)
 
     Write-Host "EXPIRA: $expiry"

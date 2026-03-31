@@ -113,6 +113,34 @@ Write-Host "Limpieza completada."
 Write-Host "Proceso de actualización finalizado. Log completo en: $logPath"
 Stop-Transcript | Out-Null
 
+# Path to Excel workbook
+$targetFile = Join-Path $target "MACROS RDA.xlsm"
+
+# Desktop path
+$desktop = [Environment]::GetFolderPath("Desktop")
+
+# Shortcut path (same name)
+$shortcutPath = Join-Path $desktop "MACROS RDA.lnk"
+
+# Create WScript.Shell COM object
+$WshShell = New-Object -ComObject WScript.Shell
+
+# Remove existing shortcut if exists
+if (Test-Path $shortcutPath) {
+    Write-Host "Existing shortcut found. Removing..."
+    Remove-Item $shortcutPath -Force
+}
+
+# Create new shortcut
+$shortcut = $WshShell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $targetFile
+$shortcut.WorkingDirectory = $target
+$shortcut.WindowStyle = 1        # Normal window
+$shortcut.Description = "Shortcut to MACROS RDA workbook"
+$shortcut.Save()
+
+Write-Host "Shortcut created on desktop: $shortcutPath"
+
 # Path to the Excel file
 $excelFile = Join-Path $target "MACROS RDA.xlsm"
 
@@ -124,5 +152,6 @@ $excelApp.Visible = $true
 $workbook = $excelApp.Workbooks.Open($excelFile)
 
 Write-Host "Workbook opened: $excelFile"
+
 
 exit

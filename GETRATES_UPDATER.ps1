@@ -112,4 +112,17 @@ Write-Host "Limpieza completada."
 # ------------------------------
 Write-Host "Proceso de actualización finalizado. Log completo en: $logPath"
 Stop-Transcript | Out-Null
+
+# Path to the Excel file
+$excelFile = Join-Path $target "MACROS RDA.xlsm"
+
+# Start Excel
+$excelApp = New-Object -ComObject Excel.Application
+$excelApp.Visible = $true
+
+# Open the workbook
+$workbook = $excelApp.Workbooks.Open($excelFile)
+
+Write-Host "Workbook opened: $excelFile"
+
 exit

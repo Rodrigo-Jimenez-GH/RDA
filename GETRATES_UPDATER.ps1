@@ -38,7 +38,8 @@ Write-Host $banner
 $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
 $latestVersion = $latest.tag_name.TrimStart('v')
 $currentVersion = $PSVersionTable.PSVersion.ToString()
-
+ Write-Host "Version Actual del Powershell: $currentVersion"
+ Write-Host "Ultima Verson del Powershell: $latestVersion"
 if ($latestVersion -ne $currentVersion) {
     Write-Host "Descargando version $latestVersion"
     

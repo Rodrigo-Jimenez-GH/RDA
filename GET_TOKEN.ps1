@@ -165,10 +165,13 @@ try {
     }
     $tokenClean = [System.Text.Encoding]::UTF8.GetString($bytes)
 
-    $path = Join-Path $PSScriptRoot "TOKEN.txt"
-    [System.IO.File]::WriteAllText($path, $tokenClean, [System.Text.Encoding]::UTF8)
-    $pathExpiry = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
-    [System.IO.File]::WriteAllText($pathExpiry, $expiry, [System.Text.Encoding]::UTF8)
+$utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
+
+$path = Join-Path $PSScriptRoot "TOKEN.txt"
+[System.IO.File]::WriteAllText($path, $tokenClean, $utf8NoBOM)
+
+$pathExpiry = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
+[System.IO.File]::WriteAllText($pathExpiry, $expiry, $utf8NoBOM)
 
     Write-Host "EXPIRA: $expiry"
     Write-Host "TOKEN: $token"

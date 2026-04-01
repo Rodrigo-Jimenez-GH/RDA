@@ -34,6 +34,21 @@ Write-Host $banner
 # ------------------------------
 # Carpeta del script
 # ------------------------------
+
+$latest = Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
+$latestVersion = $latest.tag_name.TrimStart('v')
+$currentVersion = $PSVersionTable.PSVersion.ToString()
+
+if ($latestVersion -ne $currentVersion) {
+    Write-Host "Descargando version $latestVersion"
+    
+    # Run winget interactively
+    & winget install --id Microsoft.Powershell --scope user --accept-source-agreements --accept-package-agreements
+    Write-Host "Powershell listo: $currentVersion"
+} else {
+    Write-Host "Powershell listo: $currentVersion"
+}
+
 $target = Split-Path -Parent $MyInvocation.MyCommand.Path
 Write-Host "Target folder: $target"
 

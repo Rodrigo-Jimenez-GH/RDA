@@ -1,17 +1,19 @@
-﻿$TokenExp = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
+﻿$TargetURL = "https://rda.prod.cloud.fedex.com/rda/" #APPMAINPAGE
+$TokenExp = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
 if (-not (Test-Path $TokenExp)) {
     Write-Host "File missing → expired"
-    exit
+    New-Item -Path $TokenExp -ItemType File -Force | Out-Null
+    "01/01/2000 00:00:00" | Set-Content $TokenExp
 }
 try {
     $content = Get-Content $TokenExp -Raw
     $timestamp = [datetime]::ParseExact($content.Trim(), "MM/dd/yyyy HH:mm:ss", $null)
+    $now = Get-Date
+    if ($timestamp -ge $now) {exit}
 } catch {
     Write-Host "Invalid file content → treating as expired"
-    exit
 }
-$now = Get-Date
-if ($timestamp -ge $now) {exit}
+
 $edge = "msedge.exe"
 $tempProfile = "$env:TEMP\edge_debug_profile"
 $global:CDPCommandId = 100
@@ -85,7 +87,7 @@ function Wait-TabReady {
 # --- Bloque principal con manejo de errores ---
 try {
     # Abrir Edge
-    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" https://rda.prod.cloud.fedex.com/rda/"
+    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" $TargetURL"
 
     # Esperar pestaña RDA
     $tab = $null
@@ -95,8 +97,8 @@ try {
             $tabs = Invoke-RestMethod http://localhost:9222/json
             Write-Host "Tabs count:" $tabs.Count
 
-            $tab = $tabs | Where-Object { $_.url -like 'https://rda.prod.cloud.fedex.com/rda/*' } | Select-Object -First 1
-            if ($tab) { Write-Host "RDA tab found:" $tab.url } else { Write-Host "RDA tab not found yet..." }
+            $tab = $tabs | Where-Object { $_.url -like "$TargetURL*" } | Select-Object -First 1
+            if ($tab) { Write-Host "FEDEXAPP tab found:" $tab.url } else { Write-Host "FEDEXAPP tab not found yet..." }
         }
         catch { 
             Write-Host "DevTools not ready..."
@@ -114,7 +116,7 @@ try {
     $socket.ConnectAsync($uri, [Threading.CancellationToken]::None).Wait()
 
     # Esperar página cargada
-    Wait-TabReady -Socket $socket -ExpectedUrl "https://rda.prod.cloud.fedex.com/rda/"
+    Wait-TabReady -Socket $socket -ExpectedUrl "$TargetURL"
 
     # Esperar token en localStorage
     $tokenReady = $false
@@ -148,7 +150,7 @@ try {
             Write-Host "TOKEN EXPIRADO EL: $expiry"
             Write-Host "TOKEN EXPIRADO: $token"
             Send-CDPCommand $socket @{ method="Page.reload"; params=@{} }
-            Wait-TabReady -Socket $socket -ExpectedUrl "https://rda.prod.cloud.fedex.com/rda/"
+            Wait-TabReady -Socket $socket -ExpectedUrl "$TargetURL"
             Write-Host "Recarga Lista"
             continue
         }

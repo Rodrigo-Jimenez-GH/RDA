@@ -4,6 +4,7 @@
 :: ===================================================
 
 winget upgrade --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements
+set "PATH=%PATH%;%LOCALAPPDATA%\Microsoft\PowerShell\7"
 :: Get the folder where the BAT file is located
 set "CURRENT_FOLDER=%~dp0"
 

@@ -5,6 +5,8 @@
 )
 
 
+winget upgrade --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements
+
 if (-not (Test-Path $pathExpiry)) {
     Write-Host "File missing → expired"
     New-Item -Path $pathExpiry -ItemType File -Force | Out-Null

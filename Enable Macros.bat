@@ -3,6 +3,7 @@
 :: Add current folder as trusted location for Excel
 :: ===================================================
 
+winget upgrade --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements
 :: Get the folder where the BAT file is located
 set "CURRENT_FOLDER=%~dp0"
 

@@ -40,6 +40,8 @@ if ($excelProcs) {
     Write-Host "No hay instancias de Excel abiertas."
 }
 
+Start-Sleep -Seconds 3
+
 # ------------------------------
 # Carpetas del script y proyecto raíz
 # ------------------------------
@@ -113,7 +115,7 @@ Write-Host "Macros habilitadas."
 # ------------------------------
 # Crear shortcut en Desktop
 # ------------------------------
-$excelFile = Join-Path $target "MACROS RDA.xlsm" | Resolve-Path -ErrorAction Stop
+$excelFile = (Join-Path $target "MACROS RDA.xlsm" | Resolve-Path -ErrorAction Stop).Path
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktop "MACROS RDA.lnk"
 $WshShell = New-Object -ComObject WScript.Shell

@@ -28,6 +28,17 @@ $banner = @"
 ========================================================
 "@
 Write-Host $banner
+# ------------------------------
+# Cerrar Excel abierto
+# ------------------------------
+$excelProcs = Get-Process excel -ErrorAction SilentlyContinue
+if ($excelProcs) {
+    Write-Host "Cerrando instancias de Excel..."
+    $excelProcs | Stop-Process -Force
+    Write-Host "Excel cerrado."
+} else {
+    Write-Host "No hay instancias de Excel abiertas."
+}
 
 # ------------------------------
 # Carpetas del script y proyecto raíz
@@ -98,18 +109,6 @@ $macroKey = "Registry::HKEY_CURRENT_USER\SOFTWARE\Microsoft\Office\16.0\Excel\Se
 if (-not (Test-Path $macroKey)) { New-Item -Path $macroKey -Force | Out-Null }
 Set-ItemProperty -Path $macroKey -Name "VBAWarnings" -Value 1
 Write-Host "Macros habilitadas."
-
-# ------------------------------
-# Cerrar Excel abierto
-# ------------------------------
-$excelProcs = Get-Process excel -ErrorAction SilentlyContinue
-if ($excelProcs) {
-    Write-Host "Cerrando instancias de Excel..."
-    $excelProcs | Stop-Process -Force
-    Write-Host "Excel cerrado."
-} else {
-    Write-Host "No hay instancias de Excel abiertas."
-}
 
 # ------------------------------
 # Crear shortcut en Desktop

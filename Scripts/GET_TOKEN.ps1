@@ -1,11 +1,17 @@
-﻿$TokenExp = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
-if (-not (Test-Path $TokenExp)) {
+﻿param(
+    [string]$TargetURL,
+    [string]$path,
+    [string]$pathExpiry
+)
+
+
+if (-not (Test-Path $pathExpiry)) {
     Write-Host "File missing → expired"
-    New-Item -Path $TokenExp -ItemType File -Force | Out-Null
-    "01/01/2000 00:00:00" | Set-Content $TokenExp
+    New-Item -Path $pathExpiry -ItemType File -Force | Out-Null
+    "01/01/2000 00:00:00" | Set-Content $pathExpiry
 }
 try {
-    $content = Get-Content $TokenExp -Raw
+    $content = Get-Content $pathExpiry -Raw
     $timestamp = [datetime]::ParseExact($content.Trim(), "MM/dd/yyyy HH:mm:ss", $null)
     $now = Get-Date
     if ($timestamp -ge $now) {exit}
@@ -166,10 +172,7 @@ try {
 
 $utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
 
-$path = Join-Path $PSScriptRoot "TOKEN.txt"
 [System.IO.File]::WriteAllText($path, $tokenClean, $utf8NoBOM)
-
-$pathExpiry = Join-Path $PSScriptRoot "TOKEN_EXPIRES.txt"
 [System.IO.File]::WriteAllText($pathExpiry, $expiry, $utf8NoBOM)
 
     Write-Host "EXPIRA: $expiry"
@@ -193,6 +196,6 @@ catch {
             Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
     } catch {}
-
+    pause
     Exit 1
 }

@@ -9,6 +9,7 @@
 $logPath = "$env:TEMP\getrates_update.log"
 Start-Transcript -Path $logPath -Append -ErrorAction SilentlyContinue
 
+
 # ------------------------------
 # Banner ASCII
 # ------------------------------
@@ -28,6 +29,10 @@ $banner = @"
 ========================================================
 "@
 Write-Host $banner
+
+winget upgrade --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements
+
+
 # ------------------------------
 # Cerrar Excel abierto
 # ------------------------------

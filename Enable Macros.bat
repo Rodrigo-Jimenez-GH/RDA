@@ -1,21 +1,27 @@
 @echo off
-echo :: ===================================================
-echo :: Instalador de Powershell y Habilitador de Macros
-echo :: ===================================================
-echo Cheking Powershell Install
+echo [33m:: ===================================================[0m
+echo [33m:: Instalador de Powershell y Habilitador de Macros[0m
+echo [33m:: ===================================================[0m
+echo [33m:: Desarrollado por Rodrigo Jimenez[0m
+echo [36m:: ======================== Revisando dependencias de powershell ===============================[0m
 
-:: Buscar PowerShell en usuario
-set "PSPATH="
-for /r "%LOCALAPPDATA%\Microsoft\PowerShell" %%f in (pwsh.exe) do set "PSPATH=%%f"
+where pwsh >nul 2>&1
+if %errorlevel%==0 (
+    for /f "delims=" %%i in ('where pwsh') do set "PSPATH=%%i"
+) else (
+    :: Buscar en rutas comunes
+    if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PSPATH=%ProgramFiles%\PowerShell\7\pwsh.exe"
+    if exist "%LOCALAPPDATA%\Microsoft\PowerShell\7\pwsh.exe" set "PSPATH=%LOCALAPPDATA%\Microsoft\PowerShell\7\pwsh.exe"
+)
 
 if defined PSPATH (
-    echo PowerShell ya Instalado
-    "%PSPATH%" -NoProfile -Command "Write-Host Hola"
+    echo PowerShell encontrado en: %PSPATH%
+    pwsh -NoProfile -Command "Write-Host 'PowerShell Funcionando correctamente' -ForegroundColor Green"
 ) else (
-    echo PowerShell no encontrado. Instalando...
+    echo [31mPowerShell no encontrado. Instalando...[0m
     winget install --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements -e
 )
-echo :: ======================== HABILITAR MACROS ===============================
+echo [36m:: ======================== HABILITAR MACROS ===============================[0m
 :: Obtener carpeta donde está el BAT
 set "CURRENT_FOLDER=%~dp0"
 :: Eliminar barra final
@@ -40,8 +46,11 @@ if defined LAST_LOC (
 echo Siguiente Location: %NEXT%
 
 :: Añadir trusted location
+echo Añadiendo %CURRENT_FOLDER% a lugares de confianza...
 reg add "%REG_PATH%\Location%NEXT%" /v Path /t REG_SZ /d "%CURRENT_FOLDER%" /f
+echo Añadiendo Subcarpetas a lugares de confianza...
 reg add "%REG_PATH%\Location%NEXT%" /v AllowSubFolders /t REG_DWORD /d 1 /f
 
-echo Macros activadas en: %CURRENT_FOLDER%
+echo [32mMacros activadas en: %CURRENT_FOLDER%[0m
+echo ya puede cerrar la ventana u oprima ENTER
 pause

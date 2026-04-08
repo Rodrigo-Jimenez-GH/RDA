@@ -3,7 +3,8 @@
     [string]$path,
     [string]$pathExpiry
 )
-
+$logPath = "$env:TEMP\Token.log"
+Start-Transcript -Path $logPath -Append -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $pathExpiry)) {
     Write-Host "File missing → expired"
@@ -196,6 +197,7 @@ catch {
             Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
     } catch {}
+    Stop-Transcript | Out-Null
     pause
     Exit 1
 }

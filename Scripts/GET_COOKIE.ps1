@@ -1,59 +1,38 @@
 ﻿param(
-    [string]$TargetURL,
-    [string]$path,
-    [string]$pathExpiry
+    [string]$SavePath = "C:\Macros\RDA\FGC\COOKIE.txt",
+    [string]$EXPIRY = "C:\Macros\RDA\FGC\EXPIRY.txt",
+    [bool]$CloseEdge = $false
 )
-$logPath = "$env:TEMP\Token.log"
+
+$logPath = "$env:TEMP\FGC_Cookie.log"
 Start-Transcript -Path $logPath -Append -ErrorAction SilentlyContinue
 
-if (-not (Test-Path $pathExpiry)) {
-    Write-Host "File missing → expired"
-    New-Item -Path $pathExpiry -ItemType File -Force | Out-Null
-    "01/01/2000 00:00:00" | Set-Content $pathExpiry
-}
-try {
-    $content = Get-Content $pathExpiry -Raw
-    $timestamp = [datetime]::ParseExact($content.Trim(), "MM/dd/yyyy HH:mm:ss", $null)
-    $now = Get-Date
-    if ($timestamp -ge $now) {exit}
-} catch {
-    Write-Host "Invalid file content → treating as expired"
-}
-
+# --- Configuration ---
+$TargetURL = "https://myapps-atl01.secure.fedex.com/clearance/manifest/"
 $edge = "msedge.exe"
 $tempProfile = "$env:TEMP\edge_debug_profile"
 $global:CDPCommandId = 100
 
-# --- Función Send-CDPCommand ---
+# --- Función Send-CDPCommand (Exact replication) ---
 function Send-CDPCommand {
     param(
         [Parameter(Mandatory=$true)]
         [System.Net.WebSockets.ClientWebSocket]$Socket,
-        
         [Parameter(Mandatory=$true)]
         [hashtable]$Params
     )
-
     $id = $global:CDPCommandId
     $global:CDPCommandId++
-
-    $json = @{
-        id = $id
-        method = $Params.method
-        params = $Params.params
-    } | ConvertTo-Json -Compress
-
+    $json = @{ id = $id; method = $Params.method; params = $Params.params } | ConvertTo-Json -Compress
     $bytes = [Text.Encoding]::UTF8.GetBytes($json)
     $segment = New-Object System.ArraySegment[byte] -ArgumentList (, $bytes)
     $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).Wait()
-
-    $buffer = New-Object byte[] 10240
+    $buffer = New-Object byte[] 102400 
     $result = $Socket.ReceiveAsync([ArraySegment[byte]]$buffer, [Threading.CancellationToken]::None).Result
-
     return [Text.Encoding]::UTF8.GetString($buffer, 0, $result.Count) | ConvertFrom-Json
 }
 
-# --- Función Wait-TabReady ---
+# --- Función Wait-TabReady (Exact replication) ---
 function Wait-TabReady {
     param(
         [Parameter(Mandatory=$true)]
@@ -63,141 +42,110 @@ function Wait-TabReady {
         [Parameter(Mandatory=$false)]
         [int]$RetryDelayMs = 3000
     )
-
     $ready = $false
-    $attempt = 0
-
     while (-not $ready) {
         try {
             $urlResp = Send-CDPCommand $Socket @{ method = "Runtime.evaluate"; params = @{ expression = "window.location.href" } }
             $stateResp = Send-CDPCommand $Socket @{ method = "Runtime.evaluate"; params = @{ expression = "document.readyState" } }
-
             $currentUrl = if ($urlResp.result -and $urlResp.result.result) { $urlResp.result.result.value } else { $null }
             $state = if ($stateResp.result -and $stateResp.result.result) { $stateResp.result.result.value } else { $null }
-
-            $urlOk = $true
-            if ($ExpectedUrl) { $urlOk = $currentUrl -eq $ExpectedUrl }
-
+            $urlOk = if ($ExpectedUrl) { $currentUrl -eq $ExpectedUrl } else { $true }
             if ($urlOk -and $state -eq "complete") { $ready = $true }
-            else { Start-Sleep -Milliseconds $RetryDelayMs; $attempt++; Write-Host "Esperando carga... intento $attempt ($currentUrl | $state)" }
-        }
-        catch {
-            throw "Error en Wait-TabReady: $_"
-        }
+            else { Start-Sleep -Milliseconds $RetryDelayMs }
+        } catch { throw "Error en Wait-TabReady: $_" }
     }
-
-    Write-Host "Página cargada: $currentUrl"
     return @{ url = $currentUrl; state = $state }
 }
 
-# --- Bloque principal con manejo de errores ---
+# --- Bloque principal ---
 try {
-    # Abrir Edge
-    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" $TargetURL"
+    Write-Host "--- Script Start: $(Get-Date) ---" -ForegroundColor Cyan
+    Write-Host "Iniciando Edge..."
+    Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" $TargetURL"
 
-    # Esperar pestaña RDA
     $tab = $null
-    $X = 0
     while (-not $tab) {
         try {
             $tabs = Invoke-RestMethod http://localhost:9222/json
-            Write-Host "Tabs count:" $tabs.Count
-
             $tab = $tabs | Where-Object { $_.url -like "$TargetURL*" } | Select-Object -First 1
-            if ($tab) { Write-Host "FEDEXAPP tab found:" $tab.url } else { Write-Host "FEDEXAPP tab not found yet..." }
-        }
-        catch { 
-            Write-Host "DevTools not ready..."
-        }
-
-        Start-Sleep -Milliseconds 500
-        $X++
-        Write-Host "Retry: $X"
+        } catch { Start-Sleep -Milliseconds 500 }
     }
 
-    # Conectar WebSocket
-    $ws = $tab.webSocketDebuggerUrl
     $socket = New-Object System.Net.WebSockets.ClientWebSocket
-    $uri = [Uri]$ws
-    $socket.ConnectAsync($uri, [Threading.CancellationToken]::None).Wait()
+    $socket.ConnectAsync([Uri]$tab.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
 
-    # Esperar página cargada
+    # 1. Wait for document.readyState
     Wait-TabReady -Socket $socket -ExpectedUrl "$TargetURL"
 
-    # Esperar token en localStorage
-    $tokenReady = $false
-    while (-not $tokenReady) {
-        $resp = Send-CDPCommand $socket @{
-            method = "Runtime.evaluate"
-            params = @{ expression = 'localStorage.getItem("okta-token-storage") !== null' }
+    # 2. Validation Loop for JSESSIONID
+    Write-Host "Esperando validación de sesión (Buscando JSESSIONID)..." -ForegroundColor Yellow
+    $authenticated = $false
+    $cookies = $null
+
+    while (-not $authenticated) {
+        $cookieResp = Send-CDPCommand $socket @{ method = "Network.getCookies"; params = @{} }
+        $cookies = $cookieResp.result.cookies
+        
+        if ($cookies | Where-Object { $_.name -eq "JSESSIONID" }) {
+            $authenticated = $true
+            Write-Host "JSESSIONID detectada. Sesión lista." -ForegroundColor Green
+        } else {
+            Write-Host "JSESSIONID no encontrada aún. Reintentando..."
+            Start-Sleep -Milliseconds 1500
         }
-        if ($resp.result -and $resp.result.result) { $tokenReady = $resp.result.result.value }
-        if (-not $tokenReady) { Start-Sleep -Milliseconds 500 }
     }
 
-    # Esperar token válido
-    $validToken = $false
-    while (-not $validToken) {
-        $resp = Send-CDPCommand $socket @{
-            method = "Runtime.evaluate"
-            params = @{ expression = 'JSON.stringify(JSON.parse(localStorage.getItem("okta-token-storage")).accessToken)' }
+    # --- INPECCIÓN DE COOKIES (DEBUG) ---
+    Write-Host "`n### INSPECCIÓN DE TODAS LAS COOKIES DETECTADAS ###" -ForegroundColor Gray
+    $cookies | ForEach-Object {
+        $expDate = "Session"
+        if ($_.expires -gt 0) {
+            $expDate = (Get-Date "1970-01-01").AddSeconds($_.expires).ToLocalTime().ToString("MM/dd/yyyy HH:mm:ss")
         }
-
-        if (-not $resp.result -or -not $resp.result.result -or -not $resp.result.result.value) { Start-Sleep 0.3; continue }
-
-        $data = $resp.result.result.value | ConvertFrom-Json
-        $token = $data.accessToken
-        $expires = $data.expiresAt
-
-        if (-not $token) { Write-Host "Token aún no disponible..."; Start-Sleep 1; continue }
-
-        $expiry = [DateTimeOffset]::FromUnixTimeSeconds($expires).ToLocalTime().DateTime
-        if ($expiry -le (Get-Date)) {
-            Write-Host "TOKEN EXPIRADO EL: $expiry"
-            Write-Host "TOKEN EXPIRADO: $token"
-            Send-CDPCommand $socket @{ method="Page.reload"; params=@{} }
-            Wait-TabReady -Socket $socket -ExpectedUrl "$TargetURL"
-            Write-Host "Recarga Lista"
-            continue
-        }
-
-        $validToken = $true
+        
+        Write-Host "--------------------------------------------------"
+        Write-Host "NOMBRE:  $($_.name)" -ForegroundColor White
+        Write-Host "VALOR:   $($_.value)" -ForegroundColor Gray
+        Write-Host "DOMINIO: $($_.domain)"
+        Write-Host "EXPIRA:  $expDate" -ForegroundColor Cyan
     }
+    Write-Host "--------------------------------------------------`n"
 
-    # Limpiar BOM y guardar
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($token)
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        $bytes = $bytes[3..($bytes.Length - 1)]
-    }
-    $tokenClean = [System.Text.Encoding]::UTF8.GetString($bytes)
-
-$utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
-
-[System.IO.File]::WriteAllText($path, $tokenClean, $utf8NoBOM)
-[System.IO.File]::WriteAllText($pathExpiry, $expiry, $utf8NoBOM)
-
-    Write-Host "EXPIRA: $expiry"
-    Write-Host "TOKEN: $token"
-    Write-Host "TOKEN GUARDADO en $path"
-
-    # Cerrar Edge
-    Get-CimInstance Win32_Process |
-        Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-
-    Write-Host "EDGE CERRADO"
-}
-catch {
-    Write-Host "¡ERROR DETECTADO! Detalles:"
-    Write-Host $_
+    # 3. Process and Save
+    $allCookiesString = ($cookies | ForEach-Object { "$($_.name)=$($_.value)" }) -join ";"
     
-    # Intentar cerrar Edge si sigue abierto
-    try {
-        Get-CimInstance Win32_Process |
-            Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-    } catch {}
+    # Expiry logic: 1-hour ceiling
+    $now = Get-Date
+    $persistent = $cookies | Where-Object { $_.expires -gt 0 }
+    if ($persistent) {
+        $earliest = ($persistent | Measure-Object -Property expires -Minimum).Minimum
+        $calculated = (Get-Date "1970-01-01").AddSeconds($earliest).ToLocalTime()
+        $finalExpiry = if ($calculated -gt $now.AddHours(1)) { $now.AddHours(1) } else { $calculated }
+    } else {
+        $finalExpiry = $now.AddHours(1)
+    }
+
+    $utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($SavePath, $allCookiesString, $utf8NoBOM)
+    [System.IO.File]::WriteAllText($EXPIRY, $finalExpiry.ToString("MM/dd/yyyy HH:mm:ss"), $utf8NoBOM)
+
+    Write-Host "Success! Cookies y Expiración guardados." -ForegroundColor Green
+
+} catch {
+    Write-Host "Error detectado: $_" -ForegroundColor Red
+    $CloseEdge = $true # Force close on error to reset
+} finally {
+    if ($socket -and $socket.State -eq 'Open') {
+        $socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "", [Threading.CancellationToken]::None).Wait()
+    }
+
+    # CONDITIONAL CLOSE
+    if ($CloseEdge) {
+        Write-Host "Cerrando Edge por configuración..." -ForegroundColor Yellow
+        Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    } else {
+        Write-Host "Edge se mantiene abierto para inspección manual." -ForegroundColor Magenta
+    }
+
     Stop-Transcript | Out-Null
-    pause
-    Exit 1
 }

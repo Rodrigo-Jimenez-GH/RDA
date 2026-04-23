@@ -93,7 +93,7 @@ function Wait-TabReady {
 # --- Bloque principal con manejo de errores ---
 try {
     # Abrir Edge
-    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" --no-first-run --no-default-browser-check --guest --incognito $TargetURL"
+    $proc = Start-Process $edge "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" $TargetURL"
 
     # Esperar pestaña RDA
     $tab = $null

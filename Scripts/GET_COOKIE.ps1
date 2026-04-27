@@ -1,6 +1,6 @@
 ﻿param(
-    [string]$SavePath = "C:\Macros\RDA\FGC\COOKIE.txt",
-    [string]$EXPIRY = "C:\Macros\RDA\FGC\EXPIRY.txt",
+    [string]$SavePath,
+    [string]$EXPIRY,
     [bool]$CloseEdge = $false
 )
 
@@ -8,7 +8,8 @@ $logPath = "$env:TEMP\FGC_Cookie.log"
 Start-Transcript -Path $logPath -Append -ErrorAction SilentlyContinue
 
 # --- Configuration ---
-$TargetURL = "https://myapps-atl01.secure.fedex.com/clearance/manifest/"
+#$TargetURL = "https://myapps-atl01.secure.fedex.com/clearance/manifest/"
+$TargetURL = "https://fgc-lac-cairo-atl.prod.cloud.fedex.com/clearance/mainMenu.jsp"
 $edge = "msedge.exe"
 $tempProfile = "$env:TEMP\edge_debug_profile"
 $global:CDPCommandId = 100
@@ -102,6 +103,11 @@ function Wait-TabReady {
 
         $currentUrl = $urlResp.result.result.value
         $state = $stateResp.result.result.value
+
+        write-host $currentUrl
+        write-host $ExpectedUrl
+        write-host "Current: $state"
+        write-host (($ExpectedUrl -eq $null -or $currentUrl -eq $ExpectedUrl) -and $state -eq "complete")
 
         if (($ExpectedUrl -eq $null -or $currentUrl -eq $ExpectedUrl) -and $state -eq "complete") {
             return

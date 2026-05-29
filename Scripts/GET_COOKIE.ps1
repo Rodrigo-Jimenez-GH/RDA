@@ -4,17 +4,24 @@
     [bool]$CloseEdge = $false
 )
 
+#param(
+#    [string]$SavePath = "C:\Macros\RESPS\TOKEN.txt",
+#    [string]$EXPIRY = "C:\Macros\RESPS\TOKEN_EOPS.txt",
+#    [bool]$CloseEdge = $false
+#)
+
+
 $logPath = "$env:TEMP\FGC_Cookie.log"
 Start-Transcript -Path $logPath -Append -ErrorAction SilentlyContinue
 
-# --- Configuration ---
-#$TargetURL = "https://myapps-atl01.secure.fedex.com/clearance/manifest/"
 $TargetURL = "https://fgc-lac-cairo-atl.prod.cloud.fedex.com/clearance/mainMenu.jsp"
+$PortalURL = "https://fgc-gui-app.app.paas.fedex.com/#/portal"
 $edge = "msedge.exe"
 $tempProfile = "$env:TEMP\edge_debug_profile"
-$global:CDPCommandId = 100
 
-# --- WinAPI ---
+$global:CDPCommandId = 100
+$global:DevToolsPort = 9222
+
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -25,166 +32,380 @@ public class WinAPI {
 }
 "@
 
-# --- DEBUG + HIDE FUNCTION ---
-function Debug-Hide-EdgeWindow {
-
-    Write-Host "`n=== DEBUG EDGE WINDOWS ===" -ForegroundColor Cyan
-
-    $procs = Get-CimInstance Win32_Process |
-        Where-Object { $_.Name -eq "msedge.exe" }
-
-    foreach ($proc in $procs) {
-        try {
-            $p = Get-Process -Id $proc.ProcessId -ErrorAction Stop
-            $hasWindow = $p.MainWindowHandle -ne 0
-
-            Write-Host "----------------------------------------"
-            Write-Host "PID:        $($p.Id)" -ForegroundColor Yellow
-            Write-Host "HasWindow:  $hasWindow"
-            Write-Host "Title:      $($p.MainWindowTitle)"
-            Write-Host "CmdLine:    $($proc.CommandLine)"
-
-            # 🎯 ONLY hide debugger Edge
-            if ($hasWindow -and $proc.CommandLine -like "*--remote-debugging-port=9222*") {
-
-                for ($i = 0; $i -lt 3; $i++) {
-                    $success = [WinAPI]::ShowWindowAsync($p.MainWindowHandle, 0)
-                    Start-Sleep -Milliseconds 200
-                }
-
-                Write-Host ">>> TARGET HIDDEN <<<" -ForegroundColor Green
-                Write-Host "Result: $success"
-            }
-
-        } catch {
-            Write-Host "Error con PID $($proc.ProcessId)" -ForegroundColor Red
-        }
-    }
-
-    Write-Host "========================================`n"
+function Log {
+    param([string]$Msg)
+    $ts = Get-Date -Format "HH:mm:ss.fff"
+    Write-Host "[$ts] $Msg"
 }
 
-# --- CDP COMMAND ---
+function Debug-Hide-EdgeWindow {
+    param(
+        [int]$Pid
+    )
+
+    try {
+
+        $p = Get-Process -Id $Pid -ErrorAction Stop
+
+        if ($p.MainWindowHandle -ne 0) {
+
+            $null = [WinAPI]::ShowWindowAsync(
+                $p.MainWindowHandle,
+                0
+            )
+
+            Log "Hidden PID=$Pid"
+        }
+        else {
+            Log "PID=$Pid has no visible window"
+        }
+
+    }
+    catch {
+        Log "Hide failed: $_"
+    }
+}
+
 function Send-CDPCommand {
     param(
-        [Parameter(Mandatory=$true)]
         [System.Net.WebSockets.ClientWebSocket]$Socket,
-        [Parameter(Mandatory=$true)]
         [hashtable]$Params
     )
 
     $id = $global:CDPCommandId
     $global:CDPCommandId++
 
-    $json = @{ id = $id; method = $Params.method; params = $Params.params } | ConvertTo-Json -Compress
-    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
-    $segment = New-Object System.ArraySegment[byte] -ArgumentList (, $bytes)
+    $json = @{
+        id = $id
+        method = $Params.method
+        params = $Params.params
+    } | ConvertTo-Json -Compress
 
-    $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).Wait()
+    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+
+    $Socket.SendAsync(
+        [ArraySegment[byte]]$bytes,
+        [System.Net.WebSockets.WebSocketMessageType]::Text,
+        $true,
+        [Threading.CancellationToken]::None
+    ).Wait()
 
     $buffer = New-Object byte[] 102400
-    $result = $Socket.ReceiveAsync([ArraySegment[byte]]$buffer, [Threading.CancellationToken]::None).Result
 
-    return [Text.Encoding]::UTF8.GetString($buffer, 0, $result.Count) | ConvertFrom-Json
+    $result = $Socket.ReceiveAsync(
+        [ArraySegment[byte]]$buffer,
+        [Threading.CancellationToken]::None
+    ).Result
+
+    $text = [Text.Encoding]::UTF8.GetString($buffer,0,$result.Count)
+
+    $obj = $text | ConvertFrom-Json
+
+    if ($obj -is [System.Array]) {
+        return $obj[-1]
+    }
+
+    return $obj
 }
 
-# --- WAIT TAB READY ---
 function Wait-TabReady {
     param(
-        [Parameter(Mandatory=$true)]
         [System.Net.WebSockets.ClientWebSocket]$Socket,
-        [string]$ExpectedUrl = $null,
-        [int]$RetryDelayMs = 3000
+        [string]$ExpectedUrl,
+        [int]$RetryDelayMs = 500,
+        [int]$StableHitsRequired = 2
     )
 
+    $stableHits = 0
+
     while ($true) {
-        $urlResp = Send-CDPCommand $Socket @{ method = "Runtime.evaluate"; params = @{ expression = "window.location.href" } }
-        $stateResp = Send-CDPCommand $Socket @{ method = "Runtime.evaluate"; params = @{ expression = "document.readyState" } }
+
+        $urlResp = Send-CDPCommand $Socket @{
+            method = "Runtime.evaluate"
+            params = @{ expression = "window.location.href" }
+        }
+
+        $stateResp = Send-CDPCommand $Socket @{
+            method = "Runtime.evaluate"
+            params = @{ expression = "document.readyState" }
+        }
+
+        $cookieResp = Send-CDPCommand $Socket @{
+            method = "Network.getCookies"
+            params = @{}
+        }
 
         $currentUrl = $urlResp.result.result.value
         $state = $stateResp.result.result.value
+        $cookies = $cookieResp.result.cookies
+        $hasSession = $cookies.name -contains "JSESSIONID"
 
-        write-host $currentUrl
-        write-host $ExpectedUrl
-        write-host "Current: $state"
-        write-host (($ExpectedUrl -eq $null -or $currentUrl -eq $ExpectedUrl) -and $state -eq "complete")
+        Log "URL=$currentUrl"
+        Log "STATE=$state"
+        Log "SESSION=$hasSession"
 
-        if (($ExpectedUrl -eq $null -or $currentUrl -eq $ExpectedUrl) -and $state -eq "complete") {
-            return
+        $good =
+            ($currentUrl -like "$ExpectedUrl*") -and
+            ($state -eq "complete") -and
+            $hasSession
+
+        if ($good) {
+            $stableHits++
+            Log "Stable hit $stableHits/$StableHitsRequired"
+        }
+        else {
+            $stableHits = 0
+        }
+
+        if ($stableHits -ge $StableHitsRequired) {
+            Log "Tab stable"
+            return $currentUrl
         }
 
         Start-Sleep -Milliseconds $RetryDelayMs
     }
 }
 
-# --- MAIN ---
-try {
-    Write-Host "--- Script Start: $(Get-Date) ---" -ForegroundColor Cyan
-    Write-Host "Iniciando Edge..."
+function Close-OtherTabs {
+    param(
+        [string]$KeepTabId,
+        [int]$Port = $global:DevToolsPort
+    )
 
-    $edgeProcess = Start-Process $edge `
-        "--remote-debugging-port=9222 --user-data-dir=`"$tempProfile`" $TargetURL" `
-        -PassThru
+    Log "Close-OtherTabs START"
 
-    # Wait for debugger tab
-    do {
-        Start-Sleep -Milliseconds 500
-        try {
-            $tabs = Invoke-RestMethod http://localhost:9222/json
-            $tab = $tabs | Where-Object { $_.url -like "$TargetURL*" } | Select-Object -First 1
-        } catch {}
-    } while (-not $tab)
+    $tabs = Invoke-RestMethod "http://localhost:$Port/json"
 
-    $socket = New-Object System.Net.WebSockets.ClientWebSocket
-    $socket.ConnectAsync([Uri]$tab.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
+    Log "Found $($tabs.Count) tabs"
 
-    Wait-TabReady -Socket $socket -ExpectedUrl $TargetURL
+    foreach ($t in $tabs) {
 
-    # Wait for JSESSIONID
-    Write-Host "Esperando validación de sesión..." -ForegroundColor Yellow
+        Log "Inspect $($t.id) -> $($t.url)"
 
-    do {
-        $cookieResp = Send-CDPCommand $socket @{ method = "Network.getCookies"; params = @{} }
-        $cookies = $cookieResp.result.cookies
-        $found = $cookies | Where-Object { $_.name -eq "JSESSIONID" }
+if (-not $t.id) {
+    Log "Skip no-id"
+    continue
+}
 
-        if (-not $found) {
-            Start-Sleep -Milliseconds 1500
+if (-not $t.url) {
+    Log "Skip empty-url target"
+    continue
+}
+
+if ($t.url -like "devtools://*") {
+    Log "Skip devtools"
+    continue
+}
+
+if ($t.type -ne "page") {
+    Log "Skip non-page target ($($t.type))"
+    continue
+}
+
+        if ($t.id -eq $KeepTabId) {
+            Log "Keep target"
+            continue
         }
 
-    } while (-not $found)
+        try {
+            Invoke-RestMethod `
+                "http://localhost:$Port/json/close/$($t.id)" `
+                -Method GET `
+                -TimeoutSec 5 | Out-Null
 
-    Write-Host "Sesión lista." -ForegroundColor Green
+            Log "Closed"
+        }
+        catch {
+            Log "Close failed: $_"
+        }
+    }
 
-    # Save cookies
-    $cookieString = ($cookies | ForEach-Object { "$($_.name)=$($_.value)" }) -join ";"
+    Log "Close-OtherTabs END"
+}
 
-    $now = Get-Date
-    $finalExpiry = $now.AddHours(1)
+function Wait-ForTargetTab {
+    param(
+        [string]$TargetUrl,
+        [int]$Port = $global:DevToolsPort,
+        [int]$MaxWaitSec = 300
+    )
 
-    $utf8NoBOM = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($SavePath, $cookieString, $utf8NoBOM)
-    [System.IO.File]::WriteAllText($EXPIRY, $finalExpiry.ToString("MM/dd/yyyy HH:mm:ss"), $utf8NoBOM)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
 
-    Write-Host "Cookies guardadas." -ForegroundColor Green
+    while ($sw.Elapsed.TotalSeconds -lt $MaxWaitSec) {
 
-} catch {
-    Write-Host "Error: $_" -ForegroundColor Red
+        try {
+
+            $tabs = Invoke-RestMethod "http://localhost:$Port/json"
+
+            Log "Scanning tabs..."
+
+            foreach ($t in $tabs) {
+                Log "TAB $($t.id) $($t.url)"
+            }
+
+            $tab = $tabs |
+                Where-Object {
+                    $_.url -and $_.url -like "$TargetUrl*"
+                } |
+                Select-Object -First 1
+
+            if ($tab) {
+                Log "Target tab detected"
+                return $tab
+            }
+
+        } catch {
+            Log "Scan failed: $_"
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    throw "No target tab detected"
+}
+
+try {
+
+    Log "SCRIPT START"
+
+    if (-not (Test-Path $tempProfile)) {
+        New-Item -ItemType Directory -Path $tempProfile | Out-Null
+    }
+
+    $edgeArgs =
+        "--remote-debugging-port=$global:DevToolsPort " +
+        "--user-data-dir=`"$tempProfile`" " +
+        "--no-first-run --new-window `"$TargetURL`""
+
+    Log "Launching Edge"
+
+    $edgeProcess = Start-Process `
+        -FilePath $edge `
+        -ArgumentList $edgeArgs `
+        -PassThru
+
+    Log "PID=$($edgeProcess.Id)"
+
+    Start-Sleep -Milliseconds 800
+
+    do {
+
+        Start-Sleep -Milliseconds 700
+
+        $tabs = Invoke-RestMethod `
+            "http://localhost:$global:DevToolsPort/json"
+
+        foreach ($t in $tabs) {
+            Log "TAB $($t.id) $($t.url)"
+        }
+
+        $tab = $tabs |
+            Where-Object {
+                $_.url -like "$TargetURL*" -or
+                $_.url -like "$PortalURL*"
+            } |
+            Select-Object -First 1
+
+    } while (-not $tab)
+
+    if ($tab.url -like "$PortalURL*") {
+
+        Log "Portal detected. Waiting target..."
+
+        $tab = Wait-ForTargetTab `
+            -TargetUrl $TargetURL
+    }
+
+    Log "Connecting socket"
+
+    $socket = New-Object System.Net.WebSockets.ClientWebSocket
+
+    $null = $socket.ConnectAsync(
+        [Uri]$tab.webSocketDebuggerUrl,
+        [Threading.CancellationToken]::None
+    ).Wait(5000)
+
+    Log "Socket connected"
+
+    $currentUrl = Wait-TabReady `
+        -Socket $socket `
+        -ExpectedUrl $TargetURL
+
+    Log "READY: $currentUrl"
+
+    Close-OtherTabs -KeepTabId $tab.id
+
+    Log "Extract cookies"
+
+    $cookieResp = Send-CDPCommand $socket @{
+        method = "Network.getCookies"
+        params = @{}
+    }
+
+    $cookies = $cookieResp.result.cookies
+
+    $cookieString = (
+        $cookies |
+        ForEach-Object { "$($_.name)=$($_.value)" }
+    ) -join ";"
+
+    $finalExpiry = (Get-Date).AddHours(1)
+
+    $utf8NoBOM =
+        New-Object System.Text.UTF8Encoding($false)
+
+    [System.IO.File]::WriteAllText(
+        $SavePath,
+        $cookieString,
+        $utf8NoBOM
+    )
+
+    [System.IO.File]::WriteAllText(
+        $EXPIRY,
+        $finalExpiry.ToString("MM/dd/yyyy HH:mm:ss"),
+        $utf8NoBOM
+    )
+
+    Log "Cookies saved"
+}
+catch {
+
+    Log "ERROR: $_"
     $CloseEdge = $true
 }
 finally {
-    if ($socket -and $socket.State -eq 'Open') {
-        $socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "", [Threading.CancellationToken]::None).Wait()
+
+    if (
+        $socket -and
+        $socket.State -eq 'Open'
+    ) {
+        try {
+            Log "Closing socket"
+
+            $null = $socket.CloseAsync(
+                [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
+                "",
+                [Threading.CancellationToken]::None
+            ).Wait(3000)
+        }
+        catch {
+            Log "Socket close failed"
+        }
     }
 
-    if ($CloseEdge) {
-        Get-CimInstance Win32_Process |
-            Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    if ($CloseEdge -and $edgeProcess) {
+        try {
+            Log "Killing Edge PID=$($edgeProcess.Id)"
+            Stop-Process -Id $edgeProcess.Id -Force
+            Log "Edge killed"
+        }
+        catch {
+            Log "Kill failed: $_"
+        }
     }
 
     Stop-Transcript | Out-Null
 
-    Start-Sleep -Seconds 2
     Debug-Hide-EdgeWindow
 }

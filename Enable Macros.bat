@@ -3,24 +3,7 @@ echo [33m:: ===================================================[0m
 echo [33m:: Instalador de Powershell y Habilitador de Macros[0m
 echo [33m:: ===================================================[0m
 echo [33m:: Desarrollado por Rodrigo Jimenez[0m
-echo [36m:: ======================== Revisando dependencias de powershell ===============================[0m
 
-where pwsh >nul 2>&1
-if %errorlevel%==0 (
-    for /f "delims=" %%i in ('where pwsh') do set "PSPATH=%%i"
-) else (
-    :: Buscar en rutas comunes
-    if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PSPATH=%ProgramFiles%\PowerShell\7\pwsh.exe"
-    if exist "%LOCALAPPDATA%\Microsoft\PowerShell\7\pwsh.exe" set "PSPATH=%LOCALAPPDATA%\Microsoft\PowerShell\7\pwsh.exe"
-)
-
-if defined PSPATH (
-    echo PowerShell encontrado en: %PSPATH%
-    pwsh -NoProfile -Command "Write-Host 'PowerShell Funcionando correctamente' -ForegroundColor Green"
-) else (
-    echo [31mPowerShell no encontrado. Instalando...[0m
-    winget install --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements -e
-)
 echo [36m:: ======================== HABILITAR MACROS ===============================[0m
 :: Obtener carpeta donde está el BAT
 set "CURRENT_FOLDER=%~dp0"
@@ -52,5 +35,36 @@ echo Añadiendo Subcarpetas a lugares de confianza...
 reg add "%REG_PATH%\Location%NEXT%" /v AllowSubFolders /t REG_DWORD /d 1 /f
 
 echo [32mMacros activadas en: %CURRENT_FOLDER%[0m
+
+@echo off
+choice /M "Check if POWERSHELL is installed? (PS is vital for GETRATES MACRO)"
+if errorlevel 2 goto :END
+if errorlevel 1 goto :CONTINUE
+
+:END
+echo Exiting program...
+pause
+exit
+
+:CONTINUE
+echo [36m:: ======================== Revisando dependencias de powershell ===============================[0m
+
+where pwsh >nul 2>&1
+if %errorlevel%==0 (
+    for /f "delims=" %%i in ('where pwsh') do set "PSPATH=%%i"
+) else (
+    :: Buscar en rutas comunes
+    if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PSPATH=%ProgramFiles%\PowerShell\7\pwsh.exe"
+    if exist "%LOCALAPPDATA%\Microsoft\PowerShell\7\pwsh.exe" set "PSPATH=%LOCALAPPDATA%\Microsoft\PowerShell\7\pwsh.exe"
+)
+
+if defined PSPATH (
+    echo PowerShell encontrado en: %PSPATH%
+    pwsh -NoProfile -Command "Write-Host 'PowerShell Funcionando correctamente' -ForegroundColor Green"
+) else (
+    echo [31mPowerShell no encontrado. Instalando...[0m
+    winget install --id Microsoft.PowerShell --scope user --accept-package-agreements --accept-source-agreements -e
+)
+
 echo ya puede cerrar la ventana u oprima ENTER
 pause

@@ -47,7 +47,8 @@ URL_3 = "https://fgc-gui-app.app.paas.fedex.com/api/session/check"
 # ============================================================
 
 LOGIN_URLS = [
-    "https://purpleid.okta.com/login"
+    "https://purpleid.okta.com/login",
+    "https://purpleid.okta.com/oauth2"
 ]
 
 # ============================================================
